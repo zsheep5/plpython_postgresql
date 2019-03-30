@@ -99,7 +99,7 @@ CREATE TABLE public.settings
     set_module text COLLATE pg_catalog."default",
     set_meaningofvalue text COLLATE pg_catalog."default",
     
-    CONSTRAINT metric_metric_name_key UNIQUE (metric_name)
+    CONSTRAINT settings_set_namekey UNIQUE (set_name)
 );
 
 CREATE TABLE filefolders
