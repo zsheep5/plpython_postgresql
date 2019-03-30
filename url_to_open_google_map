@@ -44,5 +44,5 @@ CREATE TABLE public.settings
 Insert into set value (default, 'GoogleMap_API', 'api key', 'system', 
 'Path to share directly that Unix/Linux postgresql function and bulk upload files to the database')
 
-Insert into set value (default, 'GoogleMap_URL_Directions', 'https://google_api.com/', 'system', 
+Insert into set value (default, 'GoogleMap_URL_Directions', 'https://www.google.com/maps/dir/', 'system', 
 'Path to share directly that Windows postgresql function and bulk upload files to the database')
