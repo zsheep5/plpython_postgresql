@@ -1,5 +1,5 @@
 
-CREATE OR REPLACE FUNCTION xmag.mapit(
+CREATE OR REPLACE FUNCTION mapit(
 	toaddr text,
 	fromaddr text)
     RETURNS text
