@@ -1,9 +1,12 @@
 ---This email function requires a couple of tables to work.
---This creates an based off table batch,  then second table carries instructions to fire off PDF report generator.
---From the resulting fire is then attached and email directly sent out.  It is also able to extract files stored
+--This creates an email based off table called batch,  then a related talbe has the instructions on how to create PDF.
+--From the resulting file is then attached and email directly sent out to the destination.  It is also able to extract files stored
 -- the database 
 
---This is different in several ways as this not just acting like SMTP client but as a SMTP server looking up the domain and sending the out the message 
+-- the key difference with this function it does not just send the email to a forwarding SMTP server
+-- but looks up the MX records sends it to finial destination.
+-- This way the Postgresql server can to its client immediately if the email has failed and the User can take
+-- corrective action.. 
 
 CREATE TYPE email_batch_result AS
 (
@@ -121,8 +124,8 @@ def send_message(smtpserver, fromaddr, toaddr, msg):  #sends the message to a co
 	# Grab the stderr from the temp file  
 	try :
 		smtpserver.quit()
-		time.sleep(0.5) ##added so the stderr has time to recieve a responds from destination answer.  
-			##parts of the logs were being dumped into the next log file made it harder to read the logs.
+		time.sleep(0.5) ##added so the stderr has time to process the responds from the destination .  
+		## if not parts of the logs were being dumped into the next log entry making it harder to read the logs.
 	except :
 		_status = -1	
 		return_message += 'The SMTP Quit Command Failed Should have not have happened need to look at the log '
@@ -138,7 +141,7 @@ def send_message(smtpserver, fromaddr, toaddr, msg):  #sends the message to a co
 																			  
 																			  
 ######################################################################################################################
-##this recreates the batch tuples in the database so the email and retry to send the email.  there is a second automated task fires off this function
+##this recreates the batch tuples in the database so the email can retried.  there is a PgAgent Task to retry messages
 def reschedule_email(toaddr, retry_time = 300, error_message = '', error_code =1 ):
 	global SMTP_CODES_RETRY, pbatch_id
 	if error_code in SMTP_CODES_RETRY :
@@ -188,7 +191,7 @@ def reschedule_email(toaddr, retry_time = 300, error_message = '', error_code =1
 																			  
 																			  
 ######################################################################################################################
-## this goes to the database loads the files stored in the database into a list and returns that list.  
+## this goes to the database loads the files stored in a table and returns that list files.  
 ## the files are put into MIMEApplication class and encoded int base64.  It assumes that the data is binary and 
 ## and MimeType is application/octet-stream.  At some point should extend this code to deal with other datatypes
 ## so the MimeType correctly matches the actual file contents.  Sending everything application/octet-stream should not cause issues
@@ -210,7 +213,7 @@ def getAttachments():
 					  
 					  
 ######################################################################################################################
-## Just a basic message builder function.  Built it this why cause the need araises to make even more complex messages
+## Just a basic message builder function.  Built it this way if the need araises to make even more complex messages
 ## having built this already as a function should cut down on refactoring the code in the future. 
 def buildmessage(fromaddr='mail@magwerks.com', replyto='', toaddr='', subject='From Magwerks', body='no message defined', html=False):
 	msg = MIMEMultipart()
@@ -363,7 +366,131 @@ for sservers in smtp_serverBCC :
 ##return [return_message, _status]
 return [return_message, 1]
 $BODY$;
+						    
+CREATE OR REPLACE FUNCTION report_to_pdf(
+	report_name text,
+	rparams text[],
+	return_bytea boolean)
+    RETURNS bytea
+    LANGUAGE 'plpython3u'
 
+    COST 100
+    VOLATILE 
+AS $BODY$
+
+import tempfile
+import uuid
+import os, fnmatch, pty, sys 
+import subprocess 
+import time
+import platform
+
+running_on = platform.system()
+if "tempdir" not in GD:
+	GD["tempdir"] =  tempfile.TemporaryDirectory()
+tmppathdir = ''
+if  running_on == 'Linux' :
+	csql = """select  get_setting_value('Report_Path_UL') as path """ 
+	tmppathdir = '/database/scripts'
+else :
+	csql = "select get_setting_value('Report_cmd_path') as path " 
+	tmppathdir = GD["tempdir"].name
+
+csql = csql + """ , get_setting_value('Report_databaseURL') as dburl,
+			get_setting_value('Report_username') as usern,
+			get_setting_value('Report_password') as pwd ;
+			"""
+command  = plpy.execute(csql)
+##this is where teh report definition is stored can be 
+_sql = "select report_source from report where lower(report_name) = lower($$%s$$) order by report_grade desc limit 1 " % (report_name)
+_report = plpy.execute(_sql)
+
+if len(_report) == 0:
+	return -1
+	plpy.error('Failed to Find the report in the database')
+
+if "tempfilename" not in GD :
+	GD["tempfilename"] =  tmppathdir+ '/' + uuid.uuid4().hex 
+if "bashScript" not in GD :
+	GD["bashScript"] =  tmppathdir+ '/' + uuid.uuid4().hex
+
+# write the report out 
+thefile = open( GD["tempfilename"] + '.xml', 'wt')
+thefile.write(_report[0]["report_source"])
+thefile.close()
+
+args = [ command[0]['path'], 
+		command[0]['dburl'], 
+		'-username='+command[0]['usern'],
+		'-passwd='+command[0]['pwd'],
+		'-pdf',
+		'-outpdf='+ GD["tempfilename"].replace('\\', '/') + '.pdf',
+		'-close',
+		 GD["tempfilename"].replace('\\', '/')+ '.xml'
+		] + ['-param=' + str(x) for x in rparams  ]					  
+plpy.notice(' '.join(args))
+
+##getting to this to work on Linux was far harder than one would think
+## the report engine require access to X11 enviroment to generate the report
+## which Postgresql does not have access to .  instead of trying to figure out to give postgresql X11 acess
+## decided to create python script that runs under another user that has the X11 enviroment
+## it generates the report, stages it in file to be read later in the script
+## put this process to sleep for 5 seconds to give the report to render a quick hack.  can rewrite this
+## so it looks at the directory ever X seconds for its file then move on if X time elesape fail.
+if  running_on == 'Linux' :	
+	thebash = open( GD["bashScript"] + '.sh', 'wt')
+	thebash.write('#!/bin/bash \n')
+	thebash.write(' '.join(args))
+	thebash.write('\nchmod 777 '+GD["tempfilename"] + '.pdf'  )
+	thebash.close()
+	os.chmod(GD["tempfilename"]+'.xml', 0o777)
+	os.chmod(GD["bashScript"]+'.sh', 0o777)
+	time.sleep(5)
+else :	
+	##this works on windows no issues as Postgresql User has
+	##access to pretty much everything in Windows enviroment. 		       
+	subprocess.run(args, shell=False)
+
+##logic here is the function returns the name of the file or bytea stream 
+rvalue = None
+if return_bytea :
+	returnF = open( GD["tempfilename"].replace('\\', '/') + '.pdf', 'r+b')
+	returnF.seek(0)
+	rvalue = returnF.read()
+	returnF.close()
+	os.remove(GD["bashScript"]+'.sh')
+	os.remove(GD["tempfilename"]+'.xml')
+	os.remove(GD["tempfilename"]+'.pdf')
+	GD.pop("tempfilename")
+	GD.pop("bashScript")
+	GD["tempdir"].cleanup()				  
+	GD.pop("tempdir")
+	
+
+return rvalue
+
+$BODY$;
+			       
+CREATE OR REPLACE FUNCTION get_setting_value(
+	pName text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+
+    COST 100
+    STABLE 
+AS $BODY$
+-- Copyright (c) 1999-2014 by OpenMFG LLC, d/b/a xTuple. 
+-- See www.xtuple.com/CPAL for the full text of the software license.
+DECLARE
+   ALIAS FOR $1;
+  _returnVal TEXT;
+BEGIN
+  SELECT set_value INTO _returnVal
+    FROM settings
+   WHERE set_name = pName;
+  RETURN _returnVal;
+END;
+$BODY$;
 
 CREATE TABLE batch
 (
@@ -388,8 +515,6 @@ CREATE TABLE batch
     batch_bcc text COLLATE pg_catalog."default",
     batch_recurring_batch_id integer,
     batch_counts integer DEFAULT 0,
-    CONSTRAINT batch_pkey PRIMARY KEY (batch_id)
-        USING INDEX TABLESPACE magwerks,
     CONSTRAINT batch_batch_recurring_batch_id_fkey FOREIGN KEY (batch_recurring_batch_id)
         REFERENCES batch (batch_id) MATCH SIMPLE
         ON UPDATE NO ACTION
@@ -404,8 +529,6 @@ CREATE TABLE batchparam
     batchparam_name text COLLATE pg_catalog."default",
     batchparam_value text COLLATE pg_catalog."default",
     batchparam_type text COLLATE pg_catalog."default",
-    CONSTRAINT batchparam_pkey PRIMARY KEY (batchparam_id)
-        USING INDEX TABLESPACE magwerks,
     CONSTRAINT batchparam_batchparam_batch_id_fkey FOREIGN KEY (batchparam_batch_id)
         REFERENCES batch (batch_id) MATCH SIMPLE
         ON UPDATE NO ACTION
@@ -425,9 +548,7 @@ CREATE TABLE emaillog
     el_server_log text COLLATE pg_catalog."default",
     el_email_message text COLLATE pg_catalog."default",
     datatime timestamp without time zone DEFAULT now(),
-    el_id integer serial primary key,
-    CONSTRAINT emaillog_pkey PRIMARY KEY (el_id)
-        USING INDEX TABLESPACE magwerks
+    el_id integer serial primary key
 );
 
 CREATE TABLE public.file
@@ -443,7 +564,16 @@ CREATE TABLE public.file
     file_date_created timestamp with time zone DEFAULT now(),
     file_hashkey text COLLATE pg_catalog."default",
     file_tsvector tsvector,
-    file_sort_order integer DEFAULT 100,
-    CONSTRAINT file_pkey PRIMARY KEY (file_id)
-        USING INDEX TABLESPACE magwerks
+    file_sort_order integer DEFAULT 100
+);
+			       
+CREATE TABLE public.settings
+(
+    set_id serial  primary key ,
+    set_name text COLLATE pg_catalog."default" NOT NULL,
+    set_value text COLLATE pg_catalog."default",
+    set_module text COLLATE pg_catalog."default",
+    set_meaningofvalue text COLLATE pg_catalog."default",
+    
+    CONSTRAINT metric_metric_name_key UNIQUE (metric_name)
 );
