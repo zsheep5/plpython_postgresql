@@ -475,12 +475,9 @@ CREATE OR REPLACE FUNCTION get_setting_value(
 	pName text)
     RETURNS text
     LANGUAGE 'plpgsql'
-
     COST 100
     STABLE 
 AS $BODY$
--- Copyright (c) 1999-2014 by OpenMFG LLC, d/b/a xTuple. 
--- See www.xtuple.com/CPAL for the full text of the software license.
 DECLARE
    ALIAS FOR $1;
   _returnVal TEXT;
