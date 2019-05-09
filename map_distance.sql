@@ -71,7 +71,7 @@ if  'ZERO_RESULTS' != gdm['rows'][0]['elements'][0]['status'] :
 	if dist < 10 :
 		dist = 10
 else :
-	plpy.notice('specificed addresses passed do not come back with a match failing')
+	plpy.notice('addresses passed did not come back with a match failing')
 
 
 ###this no long works as this API was killed
