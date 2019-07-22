@@ -4,7 +4,7 @@ import  multiprocessing as mp
 import datetime
 
 t= datetime.datetime.now()
-_constring="dbname='Magwerks' user='' host='localhost' password='' sslmode='disable'"
+_constring="dbname='' user='' host='localhost' password='' sslmode='disable'"
 
 _sql_create_t =  """ drop table if exists TempNestview; create unlogged table  TempNestview ( 
     nitem_id integer, 
