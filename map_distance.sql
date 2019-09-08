@@ -74,7 +74,7 @@ else :
 	plpy.notice('addresses passed did not come back with a match failing')
 
 
-###this no long works as this API was killed
+###this is a paid for API now 
 def getflightdata(origin, destination, pdate):
 	json_data ={
 			  "request": {
