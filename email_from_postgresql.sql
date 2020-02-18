@@ -1,11 +1,11 @@
 ---This email function requires a couple of tables to work.
 --This creates an email based off table called batch,  then a related talbe has the instructions on how to create PDF.
---From the resulting file is then attached and email directly sent out to the destination.  It is also able to extract files stored
--- the database 
+--From the resulting file is then attached and email directly sent out to the destination.  It is also able to extract 
+--files stored in the database 
 
 -- the key difference with this function it does not just send the email to a forwarding SMTP server
 -- but looks up the MX records sends it to finial destination.
--- This way the Postgresql server can to its client immediately if the email has failed and the User can take
+-- This way the Postgresql server can tell its client immediately if the email has failed and the User can take
 -- corrective action.. 
 
 CREATE TYPE email_batch_result AS
@@ -24,7 +24,9 @@ CREATE OR REPLACE FUNCTION email_batch(
 AS $BODY$
 
 import dns.resolver, re, tempfile, os, sys, time
-from smtplib import SMTP, SMTPConnectError, SMTPServerDisconnected, SMTPResponseException, SMTPSenderRefused, SMTPRecipientsRefused, SMTPDataError, SMTPHeloError
+from smtplib import SMTP, SMTPConnectError, SMTPServerDisconnected, 
+from smtplib import SMTPResponseException, SMTPSenderRefused 
+from smtplib import SMTPRecipientsRefused, SMTPDataError, SMTPHeloError
 from string import Template
 from email.mime.text import MIMEText
 from email.utils import parseaddr
@@ -53,7 +55,8 @@ def getServers_valid_Emails (pemails):  #this iterates over a coma delimted list
 	domains = list(set( [x.split('@')[1] for x in addresses if  EMAIL_REGEX.search(x)] ))
 	for domain in domains :
 		try :
-			ans = sorted(dns.resolver.query(domain, 'MX')) ##hope this works have to sort the responses to weed out strange responses on invalid responds such as msXXXX.msv1.invalid 
+			ans = sorted(dns.resolver.query(domain, 'MX')) ##hope this works have to sort the responses to weed out 
+							##strange responses on invalid responds such as msXXXX.msv1.invalid 
 			ans_server = str(ans[0].exchange)[0:-1]
 			if ans_server != '0.0.0.0' or ans_server != '0:0:0:0:0:0:0:0' :
 				ans.pop(0) ## remove the first SMTP server in the list so it not iterated over again in latter code
@@ -107,7 +110,8 @@ def send_message(smtpserver, fromaddr, toaddr, msg):  #sends the message to a co
 		return_message += "Failed got a respondes erre %s the server will retry in a few minutes \r\n " % (smtpserver._host)
 		reschedule_email( toaddr, error_message = return_message, error_code = err.smtp_code )
 	except SMTPSenderRefused as err:
-		return_message += "Failed SMTP Server %s rejected the sender email address %s \r\n full error message: %s \r\n" % (smtpserver._host, err.sender, err)
+		return_message += """Failed SMTP Server %s rejected the sender email address %s \r\n full error message: %s
+""" % (smtpserver._host, err.sender, err)
 		_status = -1
 	except SMTPRecipientsRefused as err :
 		return_message += "Failed the following emails %s  the server will retry in a few minutes \r\n " % (', '.join(err.recipients))
@@ -194,7 +198,8 @@ def reschedule_email(toaddr, retry_time = 300, error_message = '', error_code =1
 ## this goes to the database loads the files stored in a table and returns that list files.  
 ## the files are put into MIMEApplication class and encoded int base64.  It assumes that the data is binary and 
 ## and MimeType is application/octet-stream.  At some point should extend this code to deal with other datatypes
-## so the MimeType correctly matches the actual file contents.  Sending everything application/octet-stream should not cause issues
+## so the MimeType correctly matches the actual file contents.  Sending everything application/octet-stream should 
+## not cause issues
 
 def getAttachments():
 	rpg =plpy.execute("""select file_title, file_descrip, file_stream, file_type from 
@@ -204,7 +209,9 @@ def getAttachments():
 		return []
 	attachments =[]
 	for files in rpg :
-		pa = MIMEApplication(files['file_stream'], 'application/octet-stream; name="%s.%s"' % (files['file_descrip'],files['file_type'] ) )  #, _encoder=encoders.encode_base64,)
+		pa = MIMEApplication(files['file_stream'], 'application/octet-stream; name="%s.%s"' % (files['file_descrip'],
+												       files['file_type'] ) )  
+					       #, _encoder=encoders.encode_base64,)
 		encoders.encode_base64(pa)
 		pa.add_header('Content-Description', '%s.%s' % (files['file_descrip'],files['file_type'] ) )
 		pa.add_header('Content-Disposition', 'attachment; filename="%s.%s";' % (files['file_descrip'],files['file_type'] ) )
@@ -215,7 +222,8 @@ def getAttachments():
 ######################################################################################################################
 ## Just a basic message builder function.  Built it this way if the need araises to make even more complex messages
 ## having built this already as a function should cut down on refactoring the code in the future. 
-def buildmessage(fromaddr='mail@magwerks.com', replyto='', toaddr='', subject='From Magwerks', body='no message defined', html=False):
+def buildmessage(fromaddr='mail@magwerks.com', replyto='', toaddr='', subject='From Magwerks', 
+		 body='no message defined', html=False):
 	msg = MIMEMultipart()
 	msg['From'] = fromaddr
 	msg['Reply-To'] = replyto
@@ -274,7 +282,8 @@ def openserver(smtpserver, port=25, tls=False, backup_servers = [] ):
 ######################################################################################################################
 #log the communication to the SMTP servers. 
 def write_log (batch_id, server_log, email_message ) :  ##writes the emails to a log files 
-	psql = """insert into emaillog values (%s, $slog$%s$slog$, $em$%s$em$, clock_timestamp(), default )""" % (batch_id, server_log, email_message)
+	psql = """insert into emaillog values (%s, $slog$%s$slog$, $em$%s$em$, clock_timestamp(), default )""" % (batch_id,
+								server_log, email_message)
 	plpy.execute(psql)
 
 ######################################################################################################################
